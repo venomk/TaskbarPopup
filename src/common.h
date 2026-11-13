@@ -69,7 +69,8 @@ inline bool operator==(const ScreenPlace& a, const ScreenPlace& b) {
 // 迷你任务栏里能排顺序的模块（编辑模式里拖着换位置）；输入法、电量、时钟挨着时中间没有分隔线。
 // kModVolume、kModBright：底部时竖着放在图标那一行的音量、亮度调节条（横着的在下面一行，侧边时在最下面，都不算模块）
 enum Module {
-    kModStart, kModWindows, kModTray, kModMedia, kModIme, kModBattery, kModClock, kModVolume, kModBright, kModuleCount
+    kModStart, kModWindows, kModTray, kModMedia, kModIme, kModBattery, kModClock, kModVolume, kModBright, kModSettings,
+    kModuleCount
 };
 constexpr int kMinModuleScale = 50, kMaxModuleScale = 200;  // 模块大小，百分比
 constexpr int kMinLongPressMs = 200;
@@ -102,9 +103,10 @@ struct ModuleSet {
     bool ime = true;      // 输入法的中英文状态
     bool battery = true;  // 电量（没有电池时不显示）
     bool clock = true;    // 时钟
+    bool settings = true;  // 迷你任务栏里的设置按钮（齿轮）：点一下打开设置窗口
     int order[kModuleCount] = {kModStart,   kModWindows, kModTray,   kModMedia, kModIme,
-                               kModBattery, kModClock,   kModVolume, kModBright};  // 模块的顺序，见 Module
-    int scale[kModuleCount] = {100, 100, 100, 100, 100, 100, 100, 100, 100};  // 各模块的大小（百分比），编辑模式里改
+                               kModBattery, kModClock,   kModVolume, kModBright, kModSettings};  // 模块的顺序，见 Module
+    int scale[kModuleCount] = {100, 100, 100, 100, 100, 100, 100, 100, 100, 100};  // 各模块的大小（百分比），编辑模式里改
     // 自由布局：编辑模式里把模块拖到面板里随便哪儿以后，不再按顺序排，各样东西就在 box 那里（这时不用 order、scale）。
     // freeW、freeH：放模块的那块区域多大（横排时不算标题那一行）
     bool free = false;

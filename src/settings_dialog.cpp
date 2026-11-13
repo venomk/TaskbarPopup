@@ -53,7 +53,7 @@ const wchar_t* const kPageNames[kPageCount] = {L"任务栏", L"迷你任务栏",
 enum Toggle { kAutoHide, kKeepFloats, kPinTopmost, kLongPress, kPinned, kVolume, kRadios, kTray, kAutoStart, kUpdates, kPerScreen,
              kAlwaysHide, kFlashAlert, kEdgePopup, kMedia, kIme, kBattery, kClock, kClockSeconds, kClockWeekday, kClockDate,
              kShowTitle, kKeepOtherBars, kMarkScreens, kBrightAll, kBright, kVolumeCapsule, kBrightCapsule, kShowStart,
-             kShowWindows, kToggleCount };
+             kShowWindows, kSettingsBtn, kToggleCount };
 struct ToggleText {
     const wchar_t* label;
     const wchar_t* sub;  // 可以为空
@@ -89,6 +89,7 @@ const ToggleText kToggleText[kToggleCount] = {
     {L"胶囊", nullptr},
     {L"显示开始按钮", nullptr},  // 这两项只在底部和侧边一起、又是自由布局时有（可以放到另一条上）
     {L"显示窗口", nullptr},
+    {L"显示设置按钮", L"点一下打开设置窗口"},
 };
 
 // 滑块
@@ -200,7 +201,8 @@ const SideToggle kSideToggles[] = {{kTray, &ModuleSet::tray},
                                    {kMedia, &ModuleSet::media},
                                    {kIme, &ModuleSet::ime},
                                    {kBattery, &ModuleSet::battery},
-                                   {kClock, &ModuleSet::clock}};
+                                   {kClock, &ModuleSet::clock},
+                                   {kSettingsBtn, &ModuleSet::settings}};
 const SideToggle* FindSideToggle(int toggle) {
     for (const SideToggle& t : kSideToggles)
         if (t.toggle == toggle) return &t;
@@ -659,6 +661,7 @@ float BuildPage(int page, float x, float y) {
             shown.push_back([](float x, float y, float w) { return ToggleRow(kMedia, x, y, w); });
             shown.push_back([](float x, float y, float w) { return ToggleRow(kIme, x, y, w); });
             shown.push_back([](float x, float y, float w) { return ToggleRow(kBattery, x, y, w); });
+            shown.push_back([](float x, float y, float w) { return ToggleRow(kSettingsBtn, x, y, w); });
             y = AddGroup(x, y, L"显示", shown);
             // 时钟关着时收起它的选项
             std::vector<RowFn> clock = {[](float x, float y, float w) { return ToggleRow(kClock, x, y, w); }};

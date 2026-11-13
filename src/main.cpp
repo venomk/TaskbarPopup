@@ -378,8 +378,8 @@ void EnsureUnicodeIni() {
 
 namespace {
 
-const wchar_t* const kModuleKeys[kModuleCount] = {L"start",   L"windows", L"tray",   L"media",     L"ime",
-                                                  L"battery", L"clock",   L"volume", L"brightness"};
+const wchar_t* const kModuleKeys[kModuleCount] = {L"start",   L"windows", L"tray",    L"media",      L"ime",
+                                                  L"battery", L"clock",   L"volume",  L"brightness", L"settings"};
 
 // 逗号隔开的一串，一段段交给 each
 template <class F>
@@ -466,7 +466,8 @@ const ModuleKey kModuleSetKeys[] = {{L"TrayIcons", &ModuleSet::tray},
                                     {L"ShowMedia", &ModuleSet::media},
                                     {L"ShowIme", &ModuleSet::ime},
                                     {L"ShowBattery", &ModuleSet::battery},
-                                    {L"ShowClock", &ModuleSet::clock}};
+                                    {L"ShowClock", &ModuleSet::clock},
+                                    {L"ShowSettings", &ModuleSet::settings}};
 std::wstring SideKey(const wchar_t* key) { return std::wstring(L"Side") + key; }
 // 开始按钮、窗口格子显不显示：只有两条一起弹出时用，默认都显示（侧边的不跟着底部）。存成一份布局时写在 hide 里
 struct AppModuleKey {

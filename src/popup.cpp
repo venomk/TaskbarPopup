@@ -269,7 +269,7 @@ PointF s_modFrom[kModuleCount];
 double s_modStart = 0;
 constexpr double kModuleSlideMs = 200.0 * TP_ANIM_SCALE;
 // 模块变大小（拖圆点、滚轮、恢复、刚显示出来）：从 s_scaleFrom 慢慢变到设置里的大小，别的模块跟着让开
-float s_scaleFrom[kModuleCount] = {1, 1, 1, 1, 1, 1, 1, 1, 1};
+float s_scaleFrom[kModuleCount] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
 double s_scaleStart = -1e9;
 constexpr double kModuleScaleMs = 220.0 * TP_ANIM_SCALE;
 // 图标间距变了（拖缝、滚轮、双击恢复）：从 s_gapFrom 像素慢慢变到设置里的
@@ -331,10 +331,11 @@ int s_radioFailed = 0;             // 切换失败的开关（1 << RadioId）：
 int s_radioPolls = 0;              // 弹出以后为了等 Wi-Fi 连上网络又读了几遍
 
 // 媒体按钮、输入法、电量。媒体按钮的编号就是 MediaCommand
-enum Extra { kExtraNone = -1, kExtraIme = 3, kExtraBattery, kExtraCover };
+enum Extra { kExtraNone = -1, kExtraIme = 3, kExtraBattery, kExtraCover, kExtraSettings = 6 };
 bool s_showMedia = false;  // 这次弹出有没有这几样（弹出时定下来）
 bool s_showIme = false;
 bool s_showBattery = false;
+bool s_showSettings = false;  // 这次弹出显不显示设置按钮（弹出时定下来）
 bool s_mediaOpen = false;  // 点了封面，上一首、播放 / 暂停、下一首弹出来了（每次弹出都先收着，只有封面）
 float s_mediaFrom = 0;     // 弹出 / 收起动画开始时的进度
 double s_mediaStart = 0;
@@ -670,6 +671,7 @@ float BaseLen(const Layout& L, int m) {
         case kModVolume:
         case kModBright: return PillSlider(m == kModVolume ? 0 : 1) ? Px(kPillW) : 0;
         case kModStart: return L.tile;
+        case kModSettings: return s_showSettings ? L.tile : 0;  // 隐藏时长度为 0，和别的模块一样不占地方
         default: return L.itemsW;
     }
 }
@@ -1320,11 +1322,15 @@ RectF ExtraRect(int extra) {
     if (extra == kExtraIme) return v ? RectF(colLeft, L.imeY, colW, L.imeH) : RectF(L.imeX, L.tileY, L.imeW, L.tile);
     if (extra == kExtraBattery)
         return v ? RectF(colLeft, L.battY, colW, L.battH) : RectF(L.battX, L.tileY, L.battW, L.tile);
+    if (extra == kExtraSettings)
+        return v ? RectF(L.colX, L.modPos[kModSettings], L.tile, L.tile)
+                 : RectF(L.modPos[kModSettings], L.tileY, L.tile, L.tile);
     if (extra == kExtraCover) return MediaLayout().cover;
     return MediaRect(extra);
 }
 
 bool ExtraShown(int extra) {
+    if (extra == kExtraSettings) return s_showSettings;
     if (extra == kExtraIme) return s_showIme;
     if (extra == kExtraBattery) return s_showBattery;
     if (extra >= kMediaPrevious && extra <= kMediaNext) return s_showMedia && s_mediaOpen;
@@ -1332,7 +1338,10 @@ bool ExtraShown(int extra) {
 }
 
 // 媒体按钮、输入法、电量在哪个模块里
-int ExtraModule(int extra) { return extra == kExtraIme ? kModIme : extra == kExtraBattery ? kModBattery : kModMedia; }
+int ExtraModule(int extra) {
+    if (extra == kExtraSettings) return kModSettings;
+    return extra == kExtraIme ? kModIme : extra == kExtraBattery ? kModBattery : kModMedia;
+}
 
 // 画出来的位置
 RectF ExtraRectActual(int extra) { return ModRect(ExtraModule(extra), ExtraRect(extra)); }
@@ -1340,7 +1349,8 @@ RectF ExtraRectActual(int extra) { return ModRect(ExtraModule(extra), ExtraRect(
 // 鼠标下的媒体按钮、输入法或电量，没有为 kExtraNone
 int ExtraAt(int x, int y) {
     for (int e : {static_cast<int>(kMediaPrevious), static_cast<int>(kMediaPlayPause), static_cast<int>(kMediaNext),
-                  static_cast<int>(kExtraCover), static_cast<int>(kExtraIme), static_cast<int>(kExtraBattery)})
+                  static_cast<int>(kExtraCover), static_cast<int>(kExtraIme), static_cast<int>(kExtraBattery),
+                  static_cast<int>(kExtraSettings)})
         if (ExtraShown(e) && ExtraRect(e).Contains(ModToBase(ExtraModule(e), static_cast<REAL>(x), static_cast<REAL>(y))))
             return e;
     return kExtraNone;
@@ -1370,6 +1380,7 @@ std::wstring BatteryText() {
 }
 
 std::wstring ExtraText(int extra) {
+    if (extra == kExtraSettings) return Tr(L"设置");
     if (extra == kExtraIme) return s_ime.text;
     if (extra == kExtraBattery) return BatteryText();
     return MediaText();
@@ -1475,6 +1486,9 @@ RectF FreeBaseRect(const Layout& L, int m) {
         case kModIme: return v ? RectF(L.colX, L.imeY, L.tile, L.imeH) : ExtraRect(kExtraIme);
         case kModBattery: return v ? RectF(L.colX, L.battY, L.tile, L.battH) : ExtraRect(kExtraBattery);
         case kModClock: return v ? RectF(L.colX, L.clockY, L.tile, L.clockH) : RectF(L.clockX, L.tileY, L.clockW, L.tile);
+        case kModSettings:
+            return v ? RectF(L.colX, L.modPos[kModSettings], L.tile, L.tile)
+                     : RectF(L.modPos[kModSettings], L.tileY, L.tile, L.tile);
         case kModVolume:
         case kModBright: return s_sliders[m == kModVolume ? 0 : 1].box;
         default: return RectF();
@@ -2225,6 +2239,38 @@ void DrawBluetooth(Graphics& g, const RectF& box, const Color& c) {
     g.DrawLines(&pen, pts, 6);
 }
 
+// 设置按钮：一个齿轮。圆环用奇偶填充挖空（中间的孔是透明的），八颗齿绕中心转出来
+void DrawGear(Graphics& g, const RectF& box, const Color& c) {
+    float u = Px(1);
+    float cx = box.X + box.Width / 2, cy = box.Y + box.Height / 2;
+    float outer = 6.2f * u, hole = 2.6f * u, toothW = 2.2f * u, toothLen = 2.8f * u;
+    SolidBrush brush(c);
+    for (int i = 0; i < 8; ++i) {
+        GraphicsState state = g.Save();
+        g.TranslateTransform(cx, cy);
+        g.RotateTransform(static_cast<REAL>(i) * 45.0f);
+        g.FillRectangle(&brush, -toothW / 2, -(outer + toothLen - u), toothW, toothLen);
+        g.Restore(state);
+    }
+    GraphicsPath ring;
+    ring.AddEllipse(cx - outer, cy - outer, 2 * outer, 2 * outer);
+    ring.AddEllipse(cx - hole, cy - hole, 2 * hole, 2 * hole);
+    ring.SetFillMode(FillModeAlternate);
+    g.FillPath(&brush, &ring);
+}
+
+// 画设置按钮：鼠标指着时亮一个底，和输入法那块一样
+void DrawSettings(Graphics& g) {
+    if (!s_showSettings) return;
+    const Palette& pal = Colors();
+    RectF r = ExtraRect(kExtraSettings);
+    if (s_hoverExtra == kExtraSettings) {
+        float w = std::min(r.Width - Px(2), Px(30)), h = std::min(r.Height - Px(2), Px(30));
+        FillRound(g, RectF(r.X + (r.Width - w) / 2, r.Y + (r.Height - h) / 2, w, h), Px(8), pal.pillTop);
+    }
+    DrawGear(g, r, pal.text);
+}
+
 // 和系统快速设置里的开关一样：开着是强调色的底，关着是淡淡的底，读不到、不可用时只画暗的图标；正在切换时颜色淡一点
 void DrawRadios(Graphics& g) {
     const Palette& pal = Colors();
@@ -2787,6 +2833,7 @@ void DrawContent(Graphics& g) {
                 DrawLabel(g, clock.c_str(), smallFont, clockRect, clockFormat, Colors().text);
                 break;
             }
+            case kModSettings: DrawSettings(g); break;
             case kModVolume:
             case kModBright:
                 if (PillSlider(m == kModVolume ? 0 : 1)) DrawSlider(g, m == kModVolume ? 0 : 1);
@@ -3749,6 +3796,11 @@ void SetMediaOpen(bool open) {
 
 // 点了媒体按钮、封面、输入法：发命令、展开收起上一首下一首或者切换中英文，马上按新的样子画
 void ClickExtra(int extra) {
+    if (extra == kExtraSettings) {  // 设置按钮：收起迷你任务栏，打开设置窗口
+        HideNow();
+        SettingsDialog_Show();
+        return;
+    }
     if (extra == kExtraCover) {
         SetMediaOpen(!s_mediaOpen);
         return;
@@ -4658,6 +4710,7 @@ const wchar_t* PartName(int part) {
         case kModIme: return Tr(L"输入法");
         case kModBattery: return Tr(L"电量");
         case kModClock: return Tr(L"时钟");
+        case kModSettings: return Tr(L"设置");
         case kModVolume: return Tr(L"音量");
         case kModBright: return Tr(L"亮度");
         case kPartLevels: {  // 这一行放着哪几根
@@ -4980,6 +5033,7 @@ void GiveToOther(int part, POINT screen) {
                        : p == kModClock   ? mods.clock
                        : p == kModVolume  ? mods.volume
                        : p == kModBright  ? mods.brightness
+                       : p == kModSettings ? mods.settings
                        : p == kPartRadios ? mods.radios
                                           : true;
         if (!already) ShowPart(p, true);  // 先放出来（自由布局时找个空位，按原来的大小）
@@ -5083,6 +5137,10 @@ void ShowPart(int part, bool on) {
             s_showBattery = on && s_battery.present;
             break;
         case kModClock: mods.clock = on; break;
+        case kModSettings:
+            mods.settings = on;
+            s_showSettings = on;
+            break;
         case kModStart:
             mods.start = on;
             if (!on && s_sel == 0) s_sel = DefaultSelection();
@@ -5653,10 +5711,12 @@ void WheelPanel(int notches) {
 void ShowEditMenu(POINT client) {
     enum { kCmdPlace = 1, kCmdDone, kCmdSave, kCmdRestore, kCmdReset, kCmdPart = 100 };
     HMENU menu = CreatePopupMenu();
-    std::vector<int> parts = {kModTray, kModMedia, kModIme, kModBattery, kModClock, kModVolume, kModBright, kPartRadios};
+    std::vector<int> parts = {kModTray,     kModMedia, kModIme,      kModBattery, kModClock,
+                              kModSettings, kModVolume, kModBright,  kPartRadios};
     const ModuleSet& mods = Mods();
-    std::vector<bool> shown = {mods.tray,  mods.media,  mods.ime,        mods.battery,
-                               mods.clock, mods.volume, mods.brightness, mods.radios};
+    std::vector<bool> shown = {mods.tray,  mods.media,    mods.ime,        mods.battery,
+                               mods.clock, mods.settings, mods.volume,     mods.brightness,
+                               mods.radios};
     if (s_dual) {  // 底部和侧边一起：开始按钮、窗口格子也能隐藏（放到另一条上）
         parts.insert(parts.begin(), {kModStart, kModWindows});
         shown.insert(shown.begin(), {StartShown(), WindowsShown()});
@@ -6685,6 +6745,7 @@ void LoadModules(bool preview) {
     if (s_showIme) s_ime = Ime_Get(s_imeTarget);
     s_battery = Battery_Get();
     s_showBattery = mods.battery && !s_compact && s_battery.present;
+    s_showSettings = mods.settings && !s_compact;
     s_hoverExtra = kExtraNone;
 
     // 托盘图标用后台读好的（面板宽度弹出时就定了，弹出期间读到的新结果留到下次）
@@ -7023,6 +7084,7 @@ void Popup_FitTrayBoxes(ModuleSet sets[2], int style) {
         // 这条边上显示着的别的东西（大概：隐藏的不算，没电池的电量这种还是算）
         bool shown[kFreeItems] = {mods.start, mods.windows, mods.tray, mods.media, mods.ime, mods.battery, mods.clock,
                                   !vertical && mods.volume && mods.volumeCapsule, !vertical && mods.brightness && mods.brightCapsule,
+                                  mods.settings,
                                   (mods.volume && (vertical || !mods.volumeCapsule)) ||
                                       (mods.brightness && (vertical || !mods.brightCapsule)),
                                   mods.radios};

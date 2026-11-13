@@ -359,6 +359,10 @@ const wchar_t* const kEnglish[][2] = {
     {L"发现新版本 %ls，下载文件还没准备好，过一会儿再检查",
      L"New version %ls found, but its download isn't ready yet. Check again later."},
     {L"已经是最新版本（%ls）", L"You're up to date (%ls)"},
+    // 迷你任务栏里的设置按钮
+    {L"设置", L"Settings"},
+    {L"显示设置按钮", L"Settings button"},
+    {L"点一下打开设置窗口", L"Opens the settings window"},
 };
 
 }  // namespace
