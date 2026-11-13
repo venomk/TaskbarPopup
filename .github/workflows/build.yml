@@ -4,7 +4,7 @@ name: Build
 # 不再单独监听 release 事件，免得同一个版本构建、签名两次
 on:
   push:
-    branches: [main]
+    branches: [main, master]
     tags: ['v*']
   pull_request:
   workflow_dispatch:
