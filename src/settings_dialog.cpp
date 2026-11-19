@@ -53,7 +53,7 @@ const wchar_t* const kPageNames[kPageCount] = {L"任务栏", L"迷你任务栏",
 enum Toggle { kAutoHide, kKeepFloats, kPinTopmost, kLongPress, kPinned, kVolume, kRadios, kTray, kAutoStart, kUpdates, kPerScreen,
              kAlwaysHide, kFlashAlert, kEdgePopup, kMedia, kIme, kBattery, kClock, kClockSeconds, kClockWeekday, kClockDate,
              kShowTitle, kKeepOtherBars, kMarkScreens, kBrightAll, kBright, kVolumeCapsule, kBrightCapsule, kShowStart,
-             kShowWindows, kSettingsBtn, kToggleCount };
+             kShowWindows, kSettingsBtn, kTrayAll, kToggleCount };
 struct ToggleText {
     const wchar_t* label;
     const wchar_t* sub;  // 可以为空
@@ -90,6 +90,7 @@ const ToggleText kToggleText[kToggleCount] = {
     {L"显示开始按钮", nullptr},  // 这两项只在底部和侧边一起、又是自由布局时有（可以放到另一条上）
     {L"显示窗口", nullptr},
     {L"显示设置按钮", L"点一下打开设置窗口"},
+    {L"显示常驻托盘图标", L"一直露在任务栏托盘区里的那些，和系统托盘里点一样"},
 };
 
 // 滑块
@@ -655,6 +656,7 @@ float BuildPage(int page, float x, float y) {
             }
             shown.push_back([](float x, float y, float w) { return ToggleRow(kTray, x, y, w); });
             if (s_v.on[kTray]) shown.push_back([](float x, float y, float w) { return SegRow(kSegTray, x, y, w); });
+            if (s_v.on[kTray]) shown.push_back([](float x, float y, float w) { return ToggleRow(kTrayAll, x, y, w); });
             shown.push_back([](float x, float y, float w) { return LevelRow(kVolume, kVolumeCapsule, x, y, w); });
             shown.push_back([](float x, float y, float w) { return LevelRow(kBright, kBrightCapsule, x, y, w); });
             shown.push_back([](float x, float y, float w) { return ToggleRow(kRadios, x, y, w); });
@@ -1971,6 +1973,7 @@ Values ValuesFromSettings() {
     v.on[kPinTopmost] = st.pinTopmost;
     v.on[kLongPress] = st.longPressPopup;
     v.on[kPinned] = st.showPinnedApps;
+    v.on[kTrayAll] = st.trayAll;
     v.on[kFlashAlert] = st.flashAlert;
     v.on[kEdgePopup] = st.edgePopup;
     v.sides[kSideBottom] = st.modules[kSideBottom];
@@ -2211,6 +2214,10 @@ void Apply() {
     if (changed(kPinTopmost)) g_settings.pinTopmost = s_v.on[kPinTopmost];
     if (changed(kLongPress)) g_settings.longPressPopup = s_v.on[kLongPress];
     if (changed(kPinned)) g_settings.showPinnedApps = s_v.on[kPinned];
+    if (changed(kTrayAll)) {
+        g_settings.trayAll = s_v.on[kTrayAll];
+        Tray_Refresh();  // 马上重读一次，下次弹出就带上常驻图标
+    }
     if (changed(kFlashAlert)) g_settings.flashAlert = s_v.on[kFlashAlert];
     if (changed(kEdgePopup)) g_settings.edgePopup = s_v.on[kEdgePopup];
     for (int side = 0; side < 2; ++side)

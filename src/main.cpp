@@ -617,6 +617,7 @@ void LoadSettings() {
     int ms = static_cast<int>(GetPrivateProfileIntW(L"General", L"LongPressMs", kDefaultLongPressMs, f.c_str()));
     g_settings.longPressMs = std::max(kMinLongPressMs, std::min(ms, kMaxLongPressMs));
     g_settings.showPinnedApps = GetPrivateProfileIntW(L"General", L"ShowPinnedApps", 1, f.c_str()) != 0;
+    g_settings.trayAll = GetPrivateProfileIntW(L"General", L"ShowAllTrayIcons", 1, f.c_str()) != 0;
     for (const ModuleKey& k : kModuleSetKeys) {
         int def = k.oldKey ? static_cast<int>(GetPrivateProfileIntW(L"General", k.oldKey, k.def, f.c_str())) : k.def;
         bool bottom = GetPrivateProfileIntW(L"General", k.key, def, f.c_str()) != 0;
@@ -783,6 +784,7 @@ void SaveSettings() {
     WritePrivateProfileStringW(L"General", L"LongPressPopup", g_settings.longPressPopup ? L"1" : L"0", f.c_str());
     WritePrivateProfileStringW(L"General", L"LongPressMs", std::to_wstring(g_settings.longPressMs).c_str(), f.c_str());
     WritePrivateProfileStringW(L"General", L"ShowPinnedApps", g_settings.showPinnedApps ? L"1" : L"0", f.c_str());
+    WritePrivateProfileStringW(L"General", L"ShowAllTrayIcons", g_settings.trayAll ? L"1" : L"0", f.c_str());
     for (const ModuleKey& k : kModuleSetKeys) {
         WritePrivateProfileStringW(L"General", k.key, g_settings.modules[kSideBottom].*k.item ? L"1" : L"0", f.c_str());
         WritePrivateProfileStringW(L"General", SideKey(k.key).c_str(), g_settings.modules[kSideEdge].*k.item ? L"1" : L"0",

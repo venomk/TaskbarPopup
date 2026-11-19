@@ -127,6 +127,7 @@ struct Settings {
     ModuleSet modules[2];        // 迷你任务栏放在底部、侧边时各显示哪些，见 ModuleSide
     std::wstring savedLayout[2];  // 编辑模式里“保存当前布局”存下的（底部、侧边各一份，见 ModuleSetText），空 = 没存过
     int trayStyle = 0;           // 托盘图标的样式，见 TrayStyle
+    bool trayAll = true;         // 迷你任务栏里连“一直显示在任务栏上”的托盘图标也一起列出来
     int popupScale = 100;        // 迷你任务栏大小，百分比（在显示器缩放的基础上再乘），编辑模式里拖面板的边改
     int popupRadius = 22;        // 迷你任务栏的圆角半径，像素（按 100% 大小算）
     int popupLength = 0;         // 迷你任务栏的长度（横排是宽，竖排是高）：占那条屏幕边的千分之几，0 = 跟着内容
@@ -422,11 +423,11 @@ struct TrayApp {
     std::wstring name, exe;
     std::shared_ptr<Gdiplus::Bitmap> icon;       // 托盘上的图标，原来的大小（不缩放，画的时候按整像素缩放）
     std::shared_ptr<Gdiplus::Bitmap> iconLarge;  // 程序本身的高清图标，和托盘图标看上去一样才有：比 icon 画得大时用
-    bool promoted = false;  // 用户设成在任务栏上一直显示
+    bool promoted = false;  // 用户设成在任务栏托盘区里一直显示（Win10 从任务栏的工具栏读，Win11 读注册表）
     DWORD pid = 0;          // 图标属于的进程（Win10 读得到；Win11 只有程序路径，为 0）
 };
 void Tray_Refresh();                    // 在后台重新读一遍（已经在读就不管）
-std::vector<TrayApp> Tray_Hidden();     // 最近读到的、正在运行、收在“隐藏的图标”里的
+std::vector<TrayApp> Tray_Icons();      // 最近读到的、正在运行的系统托盘图标；TrayAll 关着时只给收在“隐藏的图标”里的
 // 在后台线程上去系统托盘里点它。右键弹不出程序自己的菜单时给 notify（为空则是主窗口）发 WM_APP_TRAY_MENU，
 // lParam 是 new 出来的 TrayApp，收到的一方负责 delete
 void Tray_Click(const TrayApp& app, bool right, HWND notify = nullptr);

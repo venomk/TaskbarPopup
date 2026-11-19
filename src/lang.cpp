@@ -362,6 +362,8 @@ const wchar_t* const kEnglish[][2] = {
     // 迷你任务栏里的设置按钮
     {L"设置", L"Settings"},
     {L"显示设置按钮", L"Settings button"},
+    {L"显示常驻托盘图标", L"Pinned tray icons"},
+    {L"一直露在任务栏托盘区里的那些，和系统托盘里点一样", L"Icons kept on the taskbar; clicks work like the system tray"},
     {L"点一下打开设置窗口", L"Opens the settings window"},
 };
 

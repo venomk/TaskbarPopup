@@ -5116,7 +5116,7 @@ void ShowPart(int part, bool on) {
     switch (part) {
         case kModTray:
             mods.tray = on;
-            s_tray = on ? Tray_Hidden() : std::vector<TrayApp>();
+            s_tray = on ? Tray_Icons() : std::vector<TrayApp>();
             s_trayPage = s_trayFirst = 0;
             if (on) Tray_Refresh();
             break;
@@ -6749,7 +6749,7 @@ void LoadModules(bool preview) {
     s_hoverExtra = kExtraNone;
 
     // 托盘图标用后台读好的（面板宽度弹出时就定了，弹出期间读到的新结果留到下次）
-    s_tray = mods.tray ? Tray_Hidden() : std::vector<TrayApp>();
+    s_tray = mods.tray ? Tray_Icons() : std::vector<TrayApp>();
     s_trayStyle = s_look.trayStyle;
     s_hoverTray = -1;
     s_overTray = false;

@@ -1,0 +1,616 @@
+--- a/src/common.h
++++ b/src/common.h
+@@ -69,7 +69,8 @@
+ // 迷你任务栏里能排顺序的模块（编辑模式里拖着换位置）；输入法、电量、时钟挨着时中间没有分隔线。
+ // kModVolume、kModBright：底部时竖着放在图标那一行的音量、亮度调节条（横着的在下面一行，侧边时在最下面，都不算模块）
+ enum Module {
+-    kModStart, kModWindows, kModTray, kModMedia, kModIme, kModBattery, kModClock, kModVolume, kModBright, kModuleCount
++    kModStart, kModWindows, kModTray, kModMedia, kModIme, kModBattery, kModClock, kModVolume, kModBright, kModSettings,
++    kModuleCount
+ };
+ constexpr int kMinModuleScale = 50, kMaxModuleScale = 200;  // 模块大小，百分比
+ constexpr int kMinLongPressMs = 200;
+@@ -102,9 +103,10 @@
+     bool ime = true;      // 输入法的中英文状态
+     bool battery = true;  // 电量（没有电池时不显示）
+     bool clock = true;    // 时钟
++    bool settings = true;  // 迷你任务栏里的设置按钮（齿轮）：点一下打开设置窗口
+     int order[kModuleCount] = {kModStart,   kModWindows, kModTray,   kModMedia, kModIme,
+-                               kModBattery, kModClock,   kModVolume, kModBright};  // 模块的顺序，见 Module
+-    int scale[kModuleCount] = {100, 100, 100, 100, 100, 100, 100, 100, 100};  // 各模块的大小（百分比），编辑模式里改
++                               kModBattery, kModClock,   kModVolume, kModBright, kModSettings};  // 模块的顺序，见 Module
++    int scale[kModuleCount] = {100, 100, 100, 100, 100, 100, 100, 100, 100, 100};  // 各模块的大小（百分比），编辑模式里改
+     // 自由布局：编辑模式里把模块拖到面板里随便哪儿以后，不再按顺序排，各样东西就在 box 那里（这时不用 order、scale）。
+     // freeW、freeH：放模块的那块区域多大（横排时不算标题那一行）
+     bool free = false;
+@@ -125,6 +127,7 @@
+     ModuleSet modules[2];        // 迷你任务栏放在底部、侧边时各显示哪些，见 ModuleSide
+     std::wstring savedLayout[2];  // 编辑模式里“保存当前布局”存下的（底部、侧边各一份，见 ModuleSetText），空 = 没存过
+     int trayStyle = 0;           // 托盘图标的样式，见 TrayStyle
++    bool trayAll = true;         // 迷你任务栏里连“一直显示在任务栏上”的托盘图标也一起列出来
+     int popupScale = 100;        // 迷你任务栏大小，百分比（在显示器缩放的基础上再乘），编辑模式里拖面板的边改
+     int popupRadius = 22;        // 迷你任务栏的圆角半径，像素（按 100% 大小算）
+     int popupLength = 0;         // 迷你任务栏的长度（横排是宽，竖排是高）：占那条屏幕边的千分之几，0 = 跟着内容
+@@ -420,11 +423,11 @@
+     std::wstring name, exe;
+     std::shared_ptr<Gdiplus::Bitmap> icon;       // 托盘上的图标，原来的大小（不缩放，画的时候按整像素缩放）
+     std::shared_ptr<Gdiplus::Bitmap> iconLarge;  // 程序本身的高清图标，和托盘图标看上去一样才有：比 icon 画得大时用
+-    bool promoted = false;  // 用户设成在任务栏上一直显示
++    bool promoted = false;  // 用户设成在任务栏托盘区里一直显示（Win10 从任务栏的工具栏读，Win11 读注册表）
+     DWORD pid = 0;          // 图标属于的进程（Win10 读得到；Win11 只有程序路径，为 0）
+ };
+ void Tray_Refresh();                    // 在后台重新读一遍（已经在读就不管）
+-std::vector<TrayApp> Tray_Hidden();     // 最近读到的、正在运行、收在“隐藏的图标”里的
++std::vector<TrayApp> Tray_Icons();      // 最近读到的、正在运行的系统托盘图标；TrayAll 关着时只给收在“隐藏的图标”里的
+ // 在后台线程上去系统托盘里点它。右键弹不出程序自己的菜单时给 notify（为空则是主窗口）发 WM_APP_TRAY_MENU，
+ // lParam 是 new 出来的 TrayApp，收到的一方负责 delete
+ void Tray_Click(const TrayApp& app, bool right, HWND notify = nullptr);
+--- a/src/lang.cpp
++++ b/src/lang.cpp
+@@ -359,6 +359,12 @@
+     {L"发现新版本 %ls，下载文件还没准备好，过一会儿再检查",
+      L"New version %ls found, but its download isn't ready yet. Check again later."},
+     {L"已经是最新版本（%ls）", L"You're up to date (%ls)"},
++    // 迷你任务栏里的设置按钮
++    {L"设置", L"Settings"},
++    {L"显示设置按钮", L"Settings button"},
++    {L"显示常驻托盘图标", L"Pinned tray icons"},
++    {L"一直露在任务栏托盘区里的那些，和系统托盘里点一样", L"Icons kept on the taskbar; clicks work like the system tray"},
++    {L"点一下打开设置窗口", L"Opens the settings window"},
+ };
+ 
+ }  // namespace
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -378,8 +378,8 @@
+ 
+ namespace {
+ 
+-const wchar_t* const kModuleKeys[kModuleCount] = {L"start",   L"windows", L"tray",   L"media",     L"ime",
+-                                                  L"battery", L"clock",   L"volume", L"brightness"};
++const wchar_t* const kModuleKeys[kModuleCount] = {L"start",   L"windows", L"tray",    L"media",      L"ime",
++                                                  L"battery", L"clock",   L"volume",  L"brightness", L"settings"};
+ 
+ // 逗号隔开的一串，一段段交给 each
+ template <class F>
+@@ -466,7 +466,8 @@
+                                     {L"ShowMedia", &ModuleSet::media},
+                                     {L"ShowIme", &ModuleSet::ime},
+                                     {L"ShowBattery", &ModuleSet::battery},
+-                                    {L"ShowClock", &ModuleSet::clock}};
++                                    {L"ShowClock", &ModuleSet::clock},
++                                    {L"ShowSettings", &ModuleSet::settings}};
+ std::wstring SideKey(const wchar_t* key) { return std::wstring(L"Side") + key; }
+ // 开始按钮、窗口格子显不显示：只有两条一起弹出时用，默认都显示（侧边的不跟着底部）。存成一份布局时写在 hide 里
+ struct AppModuleKey {
+@@ -616,6 +617,7 @@
+     int ms = static_cast<int>(GetPrivateProfileIntW(L"General", L"LongPressMs", kDefaultLongPressMs, f.c_str()));
+     g_settings.longPressMs = std::max(kMinLongPressMs, std::min(ms, kMaxLongPressMs));
+     g_settings.showPinnedApps = GetPrivateProfileIntW(L"General", L"ShowPinnedApps", 1, f.c_str()) != 0;
++    g_settings.trayAll = GetPrivateProfileIntW(L"General", L"ShowAllTrayIcons", 1, f.c_str()) != 0;
+     for (const ModuleKey& k : kModuleSetKeys) {
+         int def = k.oldKey ? static_cast<int>(GetPrivateProfileIntW(L"General", k.oldKey, k.def, f.c_str())) : k.def;
+         bool bottom = GetPrivateProfileIntW(L"General", k.key, def, f.c_str()) != 0;
+@@ -782,6 +784,7 @@
+     WritePrivateProfileStringW(L"General", L"LongPressPopup", g_settings.longPressPopup ? L"1" : L"0", f.c_str());
+     WritePrivateProfileStringW(L"General", L"LongPressMs", std::to_wstring(g_settings.longPressMs).c_str(), f.c_str());
+     WritePrivateProfileStringW(L"General", L"ShowPinnedApps", g_settings.showPinnedApps ? L"1" : L"0", f.c_str());
++    WritePrivateProfileStringW(L"General", L"ShowAllTrayIcons", g_settings.trayAll ? L"1" : L"0", f.c_str());
+     for (const ModuleKey& k : kModuleSetKeys) {
+         WritePrivateProfileStringW(L"General", k.key, g_settings.modules[kSideBottom].*k.item ? L"1" : L"0", f.c_str());
+         WritePrivateProfileStringW(L"General", SideKey(k.key).c_str(), g_settings.modules[kSideEdge].*k.item ? L"1" : L"0",
+--- a/src/popup.cpp
++++ b/src/popup.cpp
+@@ -269,7 +269,7 @@
+ double s_modStart = 0;
+ constexpr double kModuleSlideMs = 200.0 * TP_ANIM_SCALE;
+ // 模块变大小（拖圆点、滚轮、恢复、刚显示出来）：从 s_scaleFrom 慢慢变到设置里的大小，别的模块跟着让开
+-float s_scaleFrom[kModuleCount] = {1, 1, 1, 1, 1, 1, 1, 1, 1};
++float s_scaleFrom[kModuleCount] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
+ double s_scaleStart = -1e9;
+ constexpr double kModuleScaleMs = 220.0 * TP_ANIM_SCALE;
+ // 图标间距变了（拖缝、滚轮、双击恢复）：从 s_gapFrom 像素慢慢变到设置里的
+@@ -331,10 +331,11 @@
+ int s_radioPolls = 0;              // 弹出以后为了等 Wi-Fi 连上网络又读了几遍
+ 
+ // 媒体按钮、输入法、电量。媒体按钮的编号就是 MediaCommand
+-enum Extra { kExtraNone = -1, kExtraIme = 3, kExtraBattery, kExtraCover };
++enum Extra { kExtraNone = -1, kExtraIme = 3, kExtraBattery, kExtraCover, kExtraSettings = 6 };
+ bool s_showMedia = false;  // 这次弹出有没有这几样（弹出时定下来）
+ bool s_showIme = false;
+ bool s_showBattery = false;
++bool s_showSettings = false;  // 这次弹出显不显示设置按钮（弹出时定下来）
+ bool s_mediaOpen = false;  // 点了封面，上一首、播放 / 暂停、下一首弹出来了（每次弹出都先收着，只有封面）
+ float s_mediaFrom = 0;     // 弹出 / 收起动画开始时的进度
+ double s_mediaStart = 0;
+@@ -670,6 +671,7 @@
+         case kModVolume:
+         case kModBright: return PillSlider(m == kModVolume ? 0 : 1) ? Px(kPillW) : 0;
+         case kModStart: return L.tile;
++        case kModSettings: return s_showSettings ? L.tile : 0;  // 隐藏时长度为 0，和别的模块一样不占地方
+         default: return L.itemsW;
+     }
+ }
+@@ -1320,11 +1322,15 @@
+     if (extra == kExtraIme) return v ? RectF(colLeft, L.imeY, colW, L.imeH) : RectF(L.imeX, L.tileY, L.imeW, L.tile);
+     if (extra == kExtraBattery)
+         return v ? RectF(colLeft, L.battY, colW, L.battH) : RectF(L.battX, L.tileY, L.battW, L.tile);
++    if (extra == kExtraSettings)
++        return v ? RectF(L.colX, L.modPos[kModSettings], L.tile, L.tile)
++                 : RectF(L.modPos[kModSettings], L.tileY, L.tile, L.tile);
+     if (extra == kExtraCover) return MediaLayout().cover;
+     return MediaRect(extra);
+ }
+ 
+ bool ExtraShown(int extra) {
++    if (extra == kExtraSettings) return s_showSettings;
+     if (extra == kExtraIme) return s_showIme;
+     if (extra == kExtraBattery) return s_showBattery;
+     if (extra >= kMediaPrevious && extra <= kMediaNext) return s_showMedia && s_mediaOpen;
+@@ -1332,7 +1338,10 @@
+ }
+ 
+ // 媒体按钮、输入法、电量在哪个模块里
+-int ExtraModule(int extra) { return extra == kExtraIme ? kModIme : extra == kExtraBattery ? kModBattery : kModMedia; }
++int ExtraModule(int extra) {
++    if (extra == kExtraSettings) return kModSettings;
++    return extra == kExtraIme ? kModIme : extra == kExtraBattery ? kModBattery : kModMedia;
++}
+ 
+ // 画出来的位置
+ RectF ExtraRectActual(int extra) { return ModRect(ExtraModule(extra), ExtraRect(extra)); }
+@@ -1340,7 +1349,8 @@
+ // 鼠标下的媒体按钮、输入法或电量，没有为 kExtraNone
+ int ExtraAt(int x, int y) {
+     for (int e : {static_cast<int>(kMediaPrevious), static_cast<int>(kMediaPlayPause), static_cast<int>(kMediaNext),
+-                  static_cast<int>(kExtraCover), static_cast<int>(kExtraIme), static_cast<int>(kExtraBattery)})
++                  static_cast<int>(kExtraCover), static_cast<int>(kExtraIme), static_cast<int>(kExtraBattery),
++                  static_cast<int>(kExtraSettings)})
+         if (ExtraShown(e) && ExtraRect(e).Contains(ModToBase(ExtraModule(e), static_cast<REAL>(x), static_cast<REAL>(y))))
+             return e;
+     return kExtraNone;
+@@ -1370,6 +1380,7 @@
+ }
+ 
+ std::wstring ExtraText(int extra) {
++    if (extra == kExtraSettings) return Tr(L"设置");
+     if (extra == kExtraIme) return s_ime.text;
+     if (extra == kExtraBattery) return BatteryText();
+     return MediaText();
+@@ -1475,6 +1486,9 @@
+         case kModIme: return v ? RectF(L.colX, L.imeY, L.tile, L.imeH) : ExtraRect(kExtraIme);
+         case kModBattery: return v ? RectF(L.colX, L.battY, L.tile, L.battH) : ExtraRect(kExtraBattery);
+         case kModClock: return v ? RectF(L.colX, L.clockY, L.tile, L.clockH) : RectF(L.clockX, L.tileY, L.clockW, L.tile);
++        case kModSettings:
++            return v ? RectF(L.colX, L.modPos[kModSettings], L.tile, L.tile)
++                     : RectF(L.modPos[kModSettings], L.tileY, L.tile, L.tile);
+         case kModVolume:
+         case kModBright: return s_sliders[m == kModVolume ? 0 : 1].box;
+         default: return RectF();
+@@ -2225,6 +2239,38 @@
+     g.DrawLines(&pen, pts, 6);
+ }
+ 
++// 设置按钮：一个齿轮。圆环用奇偶填充挖空（中间的孔是透明的），八颗齿绕中心转出来
++void DrawGear(Graphics& g, const RectF& box, const Color& c) {
++    float u = Px(1);
++    float cx = box.X + box.Width / 2, cy = box.Y + box.Height / 2;
++    float outer = 6.2f * u, hole = 2.6f * u, toothW = 2.2f * u, toothLen = 2.8f * u;
++    SolidBrush brush(c);
++    for (int i = 0; i < 8; ++i) {
++        GraphicsState state = g.Save();
++        g.TranslateTransform(cx, cy);
++        g.RotateTransform(static_cast<REAL>(i) * 45.0f);
++        g.FillRectangle(&brush, -toothW / 2, -(outer + toothLen - u), toothW, toothLen);
++        g.Restore(state);
++    }
++    GraphicsPath ring;
++    ring.AddEllipse(cx - outer, cy - outer, 2 * outer, 2 * outer);
++    ring.AddEllipse(cx - hole, cy - hole, 2 * hole, 2 * hole);
++    ring.SetFillMode(FillModeAlternate);
++    g.FillPath(&brush, &ring);
++}
++
++// 画设置按钮：鼠标指着时亮一个底，和输入法那块一样
++void DrawSettings(Graphics& g) {
++    if (!s_showSettings) return;
++    const Palette& pal = Colors();
++    RectF r = ExtraRect(kExtraSettings);
++    if (s_hoverExtra == kExtraSettings) {
++        float w = std::min(r.Width - Px(2), Px(30)), h = std::min(r.Height - Px(2), Px(30));
++        FillRound(g, RectF(r.X + (r.Width - w) / 2, r.Y + (r.Height - h) / 2, w, h), Px(8), pal.pillTop);
++    }
++    DrawGear(g, r, pal.text);
++}
++
+ // 和系统快速设置里的开关一样：开着是强调色的底，关着是淡淡的底，读不到、不可用时只画暗的图标；正在切换时颜色淡一点
+ void DrawRadios(Graphics& g) {
+     const Palette& pal = Colors();
+@@ -2787,6 +2833,7 @@
+                 DrawLabel(g, clock.c_str(), smallFont, clockRect, clockFormat, Colors().text);
+                 break;
+             }
++            case kModSettings: DrawSettings(g); break;
+             case kModVolume:
+             case kModBright:
+                 if (PillSlider(m == kModVolume ? 0 : 1)) DrawSlider(g, m == kModVolume ? 0 : 1);
+@@ -3749,6 +3796,11 @@
+ 
+ // 点了媒体按钮、封面、输入法：发命令、展开收起上一首下一首或者切换中英文，马上按新的样子画
+ void ClickExtra(int extra) {
++    if (extra == kExtraSettings) {  // 设置按钮：收起迷你任务栏，打开设置窗口
++        HideNow();
++        SettingsDialog_Show();
++        return;
++    }
+     if (extra == kExtraCover) {
+         SetMediaOpen(!s_mediaOpen);
+         return;
+@@ -4658,6 +4710,7 @@
+         case kModIme: return Tr(L"输入法");
+         case kModBattery: return Tr(L"电量");
+         case kModClock: return Tr(L"时钟");
++        case kModSettings: return Tr(L"设置");
+         case kModVolume: return Tr(L"音量");
+         case kModBright: return Tr(L"亮度");
+         case kPartLevels: {  // 这一行放着哪几根
+@@ -4980,6 +5033,7 @@
+                        : p == kModClock   ? mods.clock
+                        : p == kModVolume  ? mods.volume
+                        : p == kModBright  ? mods.brightness
++                       : p == kModSettings ? mods.settings
+                        : p == kPartRadios ? mods.radios
+                                           : true;
+         if (!already) ShowPart(p, true);  // 先放出来（自由布局时找个空位，按原来的大小）
+@@ -5062,7 +5116,7 @@
+     switch (part) {
+         case kModTray:
+             mods.tray = on;
+-            s_tray = on ? Tray_Hidden() : std::vector<TrayApp>();
++            s_tray = on ? Tray_Icons() : std::vector<TrayApp>();
+             s_trayPage = s_trayFirst = 0;
+             if (on) Tray_Refresh();
+             break;
+@@ -5083,6 +5137,10 @@
+             s_showBattery = on && s_battery.present;
+             break;
+         case kModClock: mods.clock = on; break;
++        case kModSettings:
++            mods.settings = on;
++            s_showSettings = on;
++            break;
+         case kModStart:
+             mods.start = on;
+             if (!on && s_sel == 0) s_sel = DefaultSelection();
+@@ -5653,10 +5711,12 @@
+ void ShowEditMenu(POINT client) {
+     enum { kCmdPlace = 1, kCmdDone, kCmdSave, kCmdRestore, kCmdReset, kCmdPart = 100 };
+     HMENU menu = CreatePopupMenu();
+-    std::vector<int> parts = {kModTray, kModMedia, kModIme, kModBattery, kModClock, kModVolume, kModBright, kPartRadios};
++    std::vector<int> parts = {kModTray,     kModMedia, kModIme,      kModBattery, kModClock,
++                              kModSettings, kModVolume, kModBright,  kPartRadios};
+     const ModuleSet& mods = Mods();
+-    std::vector<bool> shown = {mods.tray,  mods.media,  mods.ime,        mods.battery,
+-                               mods.clock, mods.volume, mods.brightness, mods.radios};
++    std::vector<bool> shown = {mods.tray,  mods.media,    mods.ime,        mods.battery,
++                               mods.clock, mods.settings, mods.volume,     mods.brightness,
++                               mods.radios};
+     if (s_dual) {  // 底部和侧边一起：开始按钮、窗口格子也能隐藏（放到另一条上）
+         parts.insert(parts.begin(), {kModStart, kModWindows});
+         shown.insert(shown.begin(), {StartShown(), WindowsShown()});
+@@ -6685,10 +6745,11 @@
+     if (s_showIme) s_ime = Ime_Get(s_imeTarget);
+     s_battery = Battery_Get();
+     s_showBattery = mods.battery && !s_compact && s_battery.present;
++    s_showSettings = mods.settings && !s_compact;
+     s_hoverExtra = kExtraNone;
+ 
+     // 托盘图标用后台读好的（面板宽度弹出时就定了，弹出期间读到的新结果留到下次）
+-    s_tray = mods.tray ? Tray_Hidden() : std::vector<TrayApp>();
++    s_tray = mods.tray ? Tray_Icons() : std::vector<TrayApp>();
+     s_trayStyle = s_look.trayStyle;
+     s_hoverTray = -1;
+     s_overTray = false;
+@@ -7023,6 +7084,7 @@
+         // 这条边上显示着的别的东西（大概：隐藏的不算，没电池的电量这种还是算）
+         bool shown[kFreeItems] = {mods.start, mods.windows, mods.tray, mods.media, mods.ime, mods.battery, mods.clock,
+                                   !vertical && mods.volume && mods.volumeCapsule, !vertical && mods.brightness && mods.brightCapsule,
++                                  mods.settings,
+                                   (mods.volume && (vertical || !mods.volumeCapsule)) ||
+                                       (mods.brightness && (vertical || !mods.brightCapsule)),
+                                   mods.radios};
+--- a/src/settings_dialog.cpp
++++ b/src/settings_dialog.cpp
+@@ -53,7 +53,7 @@
+ enum Toggle { kAutoHide, kKeepFloats, kPinTopmost, kLongPress, kPinned, kVolume, kRadios, kTray, kAutoStart, kUpdates, kPerScreen,
+              kAlwaysHide, kFlashAlert, kEdgePopup, kMedia, kIme, kBattery, kClock, kClockSeconds, kClockWeekday, kClockDate,
+              kShowTitle, kKeepOtherBars, kMarkScreens, kBrightAll, kBright, kVolumeCapsule, kBrightCapsule, kShowStart,
+-             kShowWindows, kToggleCount };
++             kShowWindows, kSettingsBtn, kTrayAll, kToggleCount };
+ struct ToggleText {
+     const wchar_t* label;
+     const wchar_t* sub;  // 可以为空
+@@ -89,6 +89,8 @@
+     {L"胶囊", nullptr},
+     {L"显示开始按钮", nullptr},  // 这两项只在底部和侧边一起、又是自由布局时有（可以放到另一条上）
+     {L"显示窗口", nullptr},
++    {L"显示设置按钮", L"点一下打开设置窗口"},
++    {L"显示常驻托盘图标", L"一直露在任务栏托盘区里的那些，和系统托盘里点一样"},
+ };
+ 
+ // 滑块
+@@ -200,7 +202,8 @@
+                                    {kMedia, &ModuleSet::media},
+                                    {kIme, &ModuleSet::ime},
+                                    {kBattery, &ModuleSet::battery},
+-                                   {kClock, &ModuleSet::clock}};
++                                   {kClock, &ModuleSet::clock},
++                                   {kSettingsBtn, &ModuleSet::settings}};
+ const SideToggle* FindSideToggle(int toggle) {
+     for (const SideToggle& t : kSideToggles)
+         if (t.toggle == toggle) return &t;
+@@ -653,12 +656,14 @@
+             }
+             shown.push_back([](float x, float y, float w) { return ToggleRow(kTray, x, y, w); });
+             if (s_v.on[kTray]) shown.push_back([](float x, float y, float w) { return SegRow(kSegTray, x, y, w); });
++            if (s_v.on[kTray]) shown.push_back([](float x, float y, float w) { return ToggleRow(kTrayAll, x, y, w); });
+             shown.push_back([](float x, float y, float w) { return LevelRow(kVolume, kVolumeCapsule, x, y, w); });
+             shown.push_back([](float x, float y, float w) { return LevelRow(kBright, kBrightCapsule, x, y, w); });
+             shown.push_back([](float x, float y, float w) { return ToggleRow(kRadios, x, y, w); });
+             shown.push_back([](float x, float y, float w) { return ToggleRow(kMedia, x, y, w); });
+             shown.push_back([](float x, float y, float w) { return ToggleRow(kIme, x, y, w); });
+             shown.push_back([](float x, float y, float w) { return ToggleRow(kBattery, x, y, w); });
++            shown.push_back([](float x, float y, float w) { return ToggleRow(kSettingsBtn, x, y, w); });
+             y = AddGroup(x, y, L"显示", shown);
+             // 时钟关着时收起它的选项
+             std::vector<RowFn> clock = {[](float x, float y, float w) { return ToggleRow(kClock, x, y, w); }};
+@@ -1968,6 +1973,7 @@
+     v.on[kPinTopmost] = st.pinTopmost;
+     v.on[kLongPress] = st.longPressPopup;
+     v.on[kPinned] = st.showPinnedApps;
++    v.on[kTrayAll] = st.trayAll;
+     v.on[kFlashAlert] = st.flashAlert;
+     v.on[kEdgePopup] = st.edgePopup;
+     v.sides[kSideBottom] = st.modules[kSideBottom];
+@@ -2208,6 +2214,10 @@
+     if (changed(kPinTopmost)) g_settings.pinTopmost = s_v.on[kPinTopmost];
+     if (changed(kLongPress)) g_settings.longPressPopup = s_v.on[kLongPress];
+     if (changed(kPinned)) g_settings.showPinnedApps = s_v.on[kPinned];
++    if (changed(kTrayAll)) {
++        g_settings.trayAll = s_v.on[kTrayAll];
++        Tray_Refresh();  // 马上重读一次，下次弹出就带上常驻图标
++    }
+     if (changed(kFlashAlert)) g_settings.flashAlert = s_v.on[kFlashAlert];
+     if (changed(kEdgePopup)) g_settings.edgePopup = s_v.on[kEdgePopup];
+     for (int side = 0; side < 2; ++side)
+--- a/src/tray.cpp
++++ b/src/tray.cpp
+@@ -1,11 +1,13 @@
+-// 迷你任务栏里的托盘图标：系统托盘“显示隐藏的图标”里收着的那些（可以在设置里关掉）。
++// 迷你任务栏里的托盘图标：露在任务栏托盘区里一直显示的那些，加上系统托盘“显示隐藏的图标”里收着的那些（可以在设置里关掉）。
+ //
+ // 托盘区是资源管理器自己的，没有公开接口能拿到别的程序的托盘图标。这里：
+ //   - 图标和名字（在后台线程上读，迷你任务栏弹出时直接用读好的，每 15 秒、每次收起后重新读一遍）：
+ //     Win11：系统给每个托盘图标记在 HKCU\Control Panel\NotifyIconSettings 里（程序路径、最初的提示文字、
+-//     是否在任务栏上一直显示、图标快照 PNG），只列出程序正在运行、没设成一直显示的。
+-//     Win10 没有这些记录：“隐藏的图标”是资源管理器里的一个工具栏，直接读它的按钮（图标、提示文字、属于哪个窗口）
+-//   - 点击：在后台线程上用 UI 自动化在系统托盘里找到对应的按钮。左键先直接“调用”它（和在托盘里按回车一样，
++//     是否在任务栏上一直显示、图标快照 PNG），只列出程序正在运行的（“显示常驻托盘图标”关着时不要设成一直显示的）。
++//     Win10 没有这些记录：托盘区是资源管理器里的工具栏，直接读它的按钮（图标、提示文字、属于哪个窗口）。
++//     露在任务栏上的在 TrayNotifyWnd 的工具栏里（标成 promoted），收起来的在“隐藏的图标”里
++//   - 点击：露在任务栏托盘区里的图标直接点任务栏上的按钮（任务栏被本程序藏着时先遮成透明、临时显示出来再点）。
++//     收起来的在后台线程上用 UI 自动化展开“隐藏的图标”再点。左键先直接“调用”它（和在托盘里按回车一样，
+ //     不用把系统任务栏、隐藏的图标弹出来，Win10 不试这一步）；不行或者是右键，就展开“隐藏的图标”，在它上面模拟一次真的鼠标单击，
+ //     这样程序自己的窗口和右键菜单照常弹出来（右键先试像按菜单键那样让它弹菜单，鼠标不挪过去，
+ //     按鼠标位置弹菜单的程序菜单就出在迷你任务栏的图标上方；没弹出来再真点）。任务栏被本程序藏着时 UI 自动化看不到里面的按钮：先从它的子窗口找，
+@@ -298,6 +300,67 @@
+     HICON icon;
+ };
+ 
++constexpr size_t kTrayTextAt = 64;      // 借来的内存：前面放按钮，后面放提示文字
++constexpr size_t kTrayTextChars = 512;  // 提示文字最多 128 个字，足够了
++
++// 工具栏上的按钮分两种：露在任务栏托盘区里一直显示的，和收在“隐藏的图标”里的。
++// 同一个工具栏上 TBSTATE_HIDDEN 就是“没在这个工具栏里显示”，所以两种各取一半
++enum class ToolbarPick { kHidden, kShowing, kFlagged };
++
++// Win10：“隐藏的图标”是 NotifyIconOverflowWindow 里的工具栏，露在任务栏上的在 TrayNotifyWnd 的工具栏里。
++// 按钮信息在资源管理器的内存里：在它那边借一小块内存，让工具栏把按钮、提示文字写进去，再读回来
++//（只读，不往它那边写东西）。图标句柄各个进程通用，直接拿来画
++bool ReadToolbar(HANDLE explorer, HWND toolbar, BYTE* remote, ToolbarPick pick, std::vector<TrayApp>& apps,
++                 std::set<std::wstring>& seen) {
++    if (!remote) return false;
++    // 资源管理器卡住时别一直等
++    auto ask = [&](UINT msg, WPARAM wParam, LPARAM lParam, DWORD_PTR& result) {
++        return SendMessageTimeoutW(toolbar, msg, wParam, lParam, SMTO_ABORTIFHUNG, 500, &result) != 0;
++    };
++    DWORD_PTR count = 0;
++    if (!ask(TB_BUTTONCOUNT, 0, 0, count)) return false;
++    for (DWORD_PTR i = 0; i < count; ++i) {
++        TBBUTTON button = {};
++        TrayButtonData data = {};
++        DWORD_PTR got = 0;
++        if (!ask(TB_GETBUTTON, i, reinterpret_cast<LPARAM>(remote), got) || !got ||
++            !ReadProcessMemory(explorer, remote, &button, sizeof(button), nullptr))
++            continue;
++        // 收在“隐藏的图标”里的按钮带 TBSTATE_HIDDEN；程序退出了没来得及删的图标，窗口已经没了
++        bool flagged = (button.fsState & TBSTATE_HIDDEN) != 0;
++        if ((pick == ToolbarPick::kFlagged ? !flagged : flagged) || !button.dwData ||
++            !ReadProcessMemory(explorer, reinterpret_cast<const void*>(button.dwData), &data, sizeof(data), nullptr) ||
++            !IsWindow(data.hwnd))
++            continue;
++        TrayApp app;
++        app.exe = GetProcessPath(data.hwnd);
++        if (app.exe.empty()) continue;
++        // 托盘区工具栏上资源管理器自己的按钮是“隐藏的图标”那个箭头，不是程序放上去的图标
++        if (pick == ToolbarPick::kShowing && Lower(FileName(app.exe)) == L"explorer.exe") continue;
++        GetWindowThreadProcessId(data.hwnd, &app.pid);  // 受保护的进程（杀毒软件之类）拿不到程序路径，菜单、找不到时再启动都用不了
++        // 先问长度，放得下才让它写（它不管缓冲区多大）
++        DWORD_PTR length = 0;
++        std::wstring tip;
++        if (ask(TB_GETBUTTONTEXTW, static_cast<WPARAM>(button.idCommand), 0, length) && length > 0 &&
++            length < kTrayTextChars &&
++            ask(TB_GETBUTTONTEXTW, static_cast<WPARAM>(button.idCommand),
++                reinterpret_cast<LPARAM>(remote + kTrayTextAt), length)) {
++            tip.resize(length);
++            if (!ReadProcessMemory(explorer, remote + kTrayTextAt, tip.data(), length * sizeof(wchar_t), nullptr))
++                tip.clear();
++        }
++        app.name = FirstLine(tip);
++        if (app.name.empty()) app.name = FileName(app.exe);
++        if (!seen.insert(Lower(app.exe) + L"|" + app.name).second) continue;  // 同一个图标只列一次
++        if (data.icon) app.icon = BitmapFromIcon(data.icon);  // 句柄归资源管理器，不能 DestroyIcon
++        if (!app.icon) app.icon = ExeIcon(app.exe);
++        if (app.icon) app.iconLarge = LargeFor(app.exe, app.icon.get());
++        app.promoted = pick != ToolbarPick::kHidden;  // 露在任务栏托盘区里的
++        apps.push_back(std::move(app));
++    }
++    return true;
++}
++
+ // Win10：“隐藏的图标”是 NotifyIconOverflowWindow 里的工具栏（没展开时也在），按钮信息在资源管理器的内存里。
+ // 在资源管理器那边借一小块内存，让工具栏把按钮、提示文字写进去，再读回来（只读，不往它那边写东西）。
+ // 图标句柄各个进程通用，直接拿来画。找不到工具栏、读不了返回 false
+@@ -315,52 +378,38 @@
+         Log(L"托盘：打不开资源管理器进程（错误 %lu），读不到隐藏的图标", GetLastError());
+         return false;
+     }
+-    // 资源管理器卡住时别一直等
+-    auto ask = [&](UINT msg, WPARAM wParam, LPARAM lParam, DWORD_PTR& result) {
+-        return SendMessageTimeoutW(toolbar, msg, wParam, lParam, SMTO_ABORTIFHUNG, 500, &result) != 0;
+-    };
+-    constexpr size_t kTextAt = 64;      // 借来的内存：前面放按钮，后面放提示文字
+-    constexpr size_t kTextChars = 512;  // 提示文字最多 128 个字，足够了
+-    BYTE* remote = static_cast<BYTE*>(VirtualAllocEx(explorer, nullptr, kTextAt + kTextChars * sizeof(wchar_t),
++    // 露在任务栏托盘区里的图标在 TrayNotifyWnd 的工具栏里（资源管理器自己那个箭头不在工具栏上）
++    std::vector<HWND> showing;
++    if (HWND tray = FindWindowW(L"Shell_TrayWnd", nullptr)) {
++        if (HWND notify = FindWindowExW(tray, nullptr, L"TrayNotifyWnd", nullptr)) {
++            if (HWND tb = FindWindowExW(notify, nullptr, L"ToolbarWindow32", nullptr)) showing.push_back(tb);
++            if (HWND pager = FindWindowExW(notify, nullptr, L"SysPager", nullptr))
++                if (HWND tb = FindWindowExW(pager, nullptr, L"ToolbarWindow32", nullptr)) showing.push_back(tb);
++        }
++    }
++    BYTE* remote = static_cast<BYTE*>(VirtualAllocEx(explorer, nullptr, kTrayTextAt + kTrayTextChars * sizeof(wchar_t),
+                                                      MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
+     DWORD_PTR count = 0;
+-    bool ok = remote && ask(TB_BUTTONCOUNT, 0, 0, count);
++    bool ok = remote && SendMessageTimeoutW(toolbar, TB_BUTTONCOUNT, 0, 0, SMTO_ABORTIFHUNG, 500, &count) != 0;
+     std::set<std::wstring> seen;  // 同一个图标只列一次
+-    for (DWORD_PTR i = 0; ok && i < count; ++i) {
+-        TBBUTTON button = {};
+-        TrayButtonData data = {};
+-        DWORD_PTR got = 0;
+-        if (!ask(TB_GETBUTTON, i, reinterpret_cast<LPARAM>(remote), got) || !got ||
+-            !ReadProcessMemory(explorer, remote, &button, sizeof(button), nullptr))
+-            continue;
+-        // 藏起来的按钮是程序设成不显示的图标；程序退出了没来得及删的图标，窗口已经没了
+-        if ((button.fsState & TBSTATE_HIDDEN) || !button.dwData ||
+-            !ReadProcessMemory(explorer, reinterpret_cast<const void*>(button.dwData), &data, sizeof(data), nullptr) ||
+-            !IsWindow(data.hwnd))
+-            continue;
+-        TrayApp app;
+-        app.exe = GetProcessPath(data.hwnd);
+-        if (app.exe.empty()) continue;
+-        GetWindowThreadProcessId(data.hwnd, &app.pid);  // 受保护的进程（杀毒软件之类）拿不到程序路径，菜单、找不到时再启动都用不了
+-        // 先问长度，放得下才让它写（它不管缓冲区多大）
+-        DWORD_PTR length = 0;
+-        std::wstring tip;
+-        if (ask(TB_GETBUTTONTEXTW, static_cast<WPARAM>(button.idCommand), 0, length) && length > 0 &&
+-            length < kTextChars &&
+-            ask(TB_GETBUTTONTEXTW, static_cast<WPARAM>(button.idCommand), reinterpret_cast<LPARAM>(remote + kTextAt),
+-                length)) {
+-            tip.resize(length);
+-            if (!ReadProcessMemory(explorer, remote + kTextAt, tip.data(), length * sizeof(wchar_t), nullptr)) tip.clear();
++    if (ok) {
++        size_t base = apps.size();
++        for (HWND tb : showing) {
++            DWORD owner = 0;
++            if (GetWindowThreadProcessId(tb, &owner) && owner == pid)
++                ReadToolbar(explorer, tb, remote, ToolbarPick::kShowing, apps, seen);
+         }
+-        app.name = FirstLine(tip);
+-        if (app.name.empty()) app.name = FileName(app.exe);
+-        if (!seen.insert(Lower(app.exe) + L"|" + app.name).second) continue;
+-        if (data.icon) app.icon = BitmapFromIcon(data.icon);  // 句柄归资源管理器，不能 DestroyIcon
+-        if (!app.icon) app.icon = ExeIcon(app.exe);
+-        if (app.icon) app.iconLarge = LargeFor(app.exe, app.icon.get());
+-        apps.push_back(std::move(app));  // 都在隐藏的图标里，promoted 是 false
++        size_t shown = apps.size() - base;
++        if (!shown) {  // 有的系统版本托盘区没有自己的工具栏，只有“隐藏的图标”里带标记的按钮
++            ReadToolbar(explorer, toolbar, remote, ToolbarPick::kFlagged, apps, seen);
++            shown = apps.size() - base;
++        }
++        ReadToolbar(explorer, toolbar, remote, ToolbarPick::kHidden, apps, seen);
++        Log(L"托盘：常驻图标 %d 个，隐藏的图标 %d 个", static_cast<int>(shown),
++            static_cast<int>(apps.size() - base - shown));
++    } else {
++        Log(L"托盘：读不了隐藏的图标的工具栏（错误 %lu）", GetLastError());
+     }
+-    if (!ok) Log(L"托盘：读不了隐藏的图标的工具栏（错误 %lu）", GetLastError());
+     if (remote) VirtualFreeEx(explorer, remote, 0, MEM_RELEASE);
+     CloseHandle(explorer);
+     return ok;
+@@ -764,10 +813,11 @@
+     Names(L"隐藏的图标", inOverflow);
+ 
+     // Win10 的托盘是老式工具栏：“调用”它不一定会把点击转给程序，任务栏上同名的程序按钮也分不出来。
+-    // 列出来的本来就都在隐藏的图标里，直接展开它真点
+-    if (!job.overflowOnly && !LegacyTray()) {
++    // 露在任务栏托盘区里一直显示的图标（promoted）本来就该点任务栏上的那个按钮，收在“隐藏的图标”里的照旧展开它真点
++    bool onTaskbarIcon = job.app.promoted && !job.overflowOnly;
++    if (!job.overflowOnly && (!LegacyTray() || onTaskbarIcon)) {
+         // 左键：直接“调用”按钮，什么都不用弹出来
+-        if (!job.right) {
++        if (!job.right && !LegacyTray()) {
+             const Button* b = BestMatch(inOverflow, job.app, false);
+             if (!b) b = BestMatch(onTaskbar, job.app, false);
+             if (b && Press(*b)) {
+@@ -776,12 +826,29 @@
+             }
+         }
+         // 任务栏露着、图标就在上面：直接点
+-        if (tray && IsWindowVisible(tray))
++        if (tray && IsWindowVisible(tray)) {
+             if (const Button* b = BestMatch(onTaskbar, job.app, true)) {
+                 Log(L"托盘：点任务栏上的 %ls", b->name.c_str());
+                 ClickAt(b->rect, job.right);
+                 return true;
+             }
++        } else if (onTaskbarIcon && tray) {
++            // 任务栏是本程序藏着的：先遮成透明、临时显示出来，再点上面那个图标（点完 ClickThread 让主线程藏回去）
++            Veil(tray);
++            DWORD_PTR ours = 0;
++            if (SendMessageTimeoutW(g_mainWnd, WM_APP_TRAY_PEEK, 1, reinterpret_cast<LPARAM>(tray), SMTO_ABORTIFHUNG,
++                                    1000, &ours) &&
++                ours) {
++                for (int i = 0; i < 20 && !IsWindowVisible(tray); ++i) Sleep(50);
++                onTaskbar = TaskbarButtons(uia.p, tray);
++                Names(L"临时显示的任务栏", onTaskbar);
++                if (const Button* b = BestMatch(onTaskbar, job.app, true)) {
++                    Log(L"托盘：临时显示任务栏以后点上面的 %ls", b->name.c_str());
++                    ClickAt(b->rect, job.right);
++                    return true;
++                }
++            }
++        }
+     }
+ 
+     // 展开“隐藏的图标”，在里面点。只是去点里面的一个图标（不是要看隐藏的图标）时先遮住：
+@@ -1047,12 +1114,12 @@
+     else s_loading = false;
+ }
+ 
+-std::vector<TrayApp> Tray_Hidden() {
++std::vector<TrayApp> Tray_Icons() {
+     std::lock_guard<std::mutex> guard(s_lock);
+-    std::vector<TrayApp> hidden;
++    std::vector<TrayApp> icons;
+     for (const TrayApp& app : s_apps)
+-        if (!app.promoted) hidden.push_back(app);
+-    return hidden;
++        if (g_settings.trayAll || !app.promoted) icons.push_back(app);  // TrayAll 关着时只要收在“隐藏的图标”里的
++    return icons;
+ }
+ 
+ void Tray_Click(const TrayApp& app, bool right, HWND notify) { StartJob(new Job{app, right, false, notify}); }
