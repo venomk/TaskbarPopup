@@ -1071,17 +1071,16 @@ void EndApp(const TrayApp& app) {
     if (HANDLE h = CreateThread(nullptr, 0, EndThread, new EndJob{app.name, std::move(pids)}, 0, nullptr)) CloseHandle(h);
 }
 
-enum TrayCmd : UINT { kTrayOpen = 1, kTrayAppMenu, kTrayLocation, kTrayEnd };
+enum TrayCmd : UINT { kTrayOpen = 1, kTrayLocation, kTrayEnd };
 
 }  // namespace
 
-bool Tray_Menu(const TrayApp& app, HWND owner, POINT at, void (*picked)(), bool appMenu, UINT align) {
+bool Tray_Menu(const TrayApp& app, HWND owner, POINT at, void (*picked)(), UINT align) {
     std::wstring name = app.name.size() > 40 ? app.name.substr(0, 39) + L"…" : app.name;
     HMENU menu = CreatePopupMenu();
     AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, name.c_str());  // 第一行是哪个程序
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, kTrayOpen, Tr(L"打开"));
-    if (appMenu) AppendMenuW(menu, MF_STRING, kTrayAppMenu, Tr(L"程序菜单"));
     if (GetFileAttributesW(app.exe.c_str()) != INVALID_FILE_ATTRIBUTES)
         AppendMenuW(menu, MF_STRING, kTrayLocation, Tr(L"打开文件所在的位置"));
     // 资源管理器（“安全删除硬件”等）和本程序自己不给结束：一结束桌面、任务栏就没了，或者来不及把任务栏放回来
@@ -1097,7 +1096,6 @@ bool Tray_Menu(const TrayApp& app, HWND owner, POINT at, void (*picked)(), bool 
     UINT cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY | align, at.x, at.y, 0, owner, nullptr);
     PostMessageW(owner, WM_NULL, 0, 0);
     DestroyMenu(menu);
-    if (cmd == kTrayAppMenu) return true;
     if (!cmd) return false;
     if (picked) picked();
     switch (cmd) {

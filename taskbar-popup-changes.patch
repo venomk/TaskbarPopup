@@ -31,7 +31,7 @@
      int popupScale = 100;        // 迷你任务栏大小，百分比（在显示器缩放的基础上再乘），编辑模式里拖面板的边改
      int popupRadius = 22;        // 迷你任务栏的圆角半径，像素（按 100% 大小算）
      int popupLength = 0;         // 迷你任务栏的长度（横排是宽，竖排是高）：占那条屏幕边的千分之几，0 = 跟着内容
-@@ -420,11 +423,11 @@
+@@ -420,21 +423,20 @@
      std::wstring name, exe;
      std::shared_ptr<Gdiplus::Bitmap> icon;       // 托盘上的图标，原来的大小（不缩放，画的时候按整像素缩放）
      std::shared_ptr<Gdiplus::Bitmap> iconLarge;  // 程序本身的高清图标，和托盘图标看上去一样才有：比 icon 画得大时用
@@ -45,9 +45,30 @@
  // 在后台线程上去系统托盘里点它。右键弹不出程序自己的菜单时给 notify（为空则是主窗口）发 WM_APP_TRAY_MENU，
  // lParam 是 new 出来的 TrayApp，收到的一方负责 delete
  void Tray_Click(const TrayApp& app, bool right, HWND notify = nullptr);
+ void Tray_ShowHidden();                 // 展开系统的“隐藏的图标”
+ bool Tray_Busy();                       // 还在系统托盘里找、点
+ void Tray_RepairVeil();                 // 点托盘图标时调透明的任务栏、隐藏的图标没放回（崩溃、被结束）：放回来
+-// 迷你任务栏自己的菜单：打开、打开文件所在的位置、结束程序，appMenu 时再加一项“程序菜单”。
+-// 由 owner 在屏幕坐标 at 弹出（默认底边对着它）。选了别的项时先调用 picked（可以为空，比如收起迷你任务栏）再去做；
+-// 返回 true = 选了“程序菜单”，由调用的一方去系统托盘里右键它
+-bool Tray_Menu(const TrayApp& app, HWND owner, POINT at, void (*picked)(), bool appMenu = false,
++// 迷你任务栏自己的菜单：打开、打开文件所在的位置、结束程序。
++// 由 owner 在屏幕坐标 at 弹出（默认底边对着它）。选了别的项时先调用 picked（可以为空，比如收起迷你任务栏）再去做
++bool Tray_Menu(const TrayApp& app, HWND owner, POINT at, void (*picked)(),
+                UINT align = TPM_BOTTOMALIGN);  // align：TrackPopupMenu 的对齐方式
+ bool Tray_OnMessage(UINT msg, LPARAM lParam);  // 主窗口收到 WM_APP_TRAY_LAUNCH、WM_APP_TRAY_MENU 时交给它
+ 
 --- a/src/lang.cpp
 +++ b/src/lang.cpp
-@@ -359,6 +359,12 @@
+@@ -295,7 +295,6 @@
+     {L"最大化时隐藏任务栏", L"Hide taskbar when maximized"},
+     {L"关闭窗口", L"Close window"},
+     {L"关闭全部 %d 个窗口", L"Close all %d windows"},
+-    {L"程序菜单", L"App menu"},
+     {L"结束程序", L"End task"},
+     {L"结束“%ls”？\n它没保存的内容会丢失。", L"End \"%ls\"?\nAnything it hasn't saved will be lost."},
+     {L"结束“%ls”的全部 %d 个进程？\n它们没保存的内容会丢失。",
+@@ -359,6 +358,12 @@
      {L"发现新版本 %ls，下载文件还没准备好，过一会儿再检查",
       L"New version %ls found, but its download isn't ready yet. Check again later."},
      {L"已经是最新版本（%ls）", L"You're up to date (%ls)"},
@@ -246,7 +267,53 @@
      if (extra == kExtraCover) {
          SetMediaOpen(!s_mediaOpen);
          return;
-@@ -4658,6 +4710,7 @@
+@@ -4124,10 +4176,11 @@
+     ShowItemMenu(s_sel, MenuAnchor(TileRect(s_sel)));
+ }
+ 
+-void ShowTrayMenu(int cell, const TrayApp& app, bool offerAppMenu);
++void ShowTrayMenu(int cell, const TrayApp& app);
++void TrayAppMenu(int cell, const TrayApp& app);
+ 
+ // 点托盘格子：左键先收起迷你任务栏，再去系统托盘里点它。
+-// 右键在那一格上方弹迷你任务栏自己的菜单，不碰系统托盘；选“程序菜单”才去系统托盘里右键它（TrayAppMenu）
++// 右键直接去系统托盘里右键它，弹出和系统托盘里一样的右键菜单；点不中时才改成迷你任务栏自己的菜单（Instead）
+ void ActivateTray(int i, bool right) {
+     if (i < 0 || i >= TrayCells() || !TrayOnPage(i)) return;
+     TrayApp app = s_tray[i];
+@@ -4136,7 +4189,7 @@
+         Tray_Click(app, false);
+         return;
+     }
+-    ShowTrayMenu(i, app, true);
++    TrayAppMenu(i, app);
+ }
+ 
+ // 去系统托盘里右键它、弹出它自己的菜单。迷你任务栏留着，菜单关了再看要不要收起（WatchTrayMenu）
+@@ -4222,8 +4275,7 @@
+ }
+ 
+ // 在那一格上方弹迷你任务栏自己的菜单，迷你任务栏留着；选了一项再收起。
+-// offerAppMenu = 加一项“程序菜单”（系统托盘里刚弹不出来时就不加了）
+-void ShowTrayMenu(int cell, const TrayApp& app, bool offerAppMenu) {
++void ShowTrayMenu(int cell, const TrayApp& app) {
+     EndTrayMode();
+     if (cell < 0 || cell >= TrayCells() || s_tray[cell].exe != app.exe) {
+         cell = -1;
+@@ -4241,11 +4293,10 @@
+     s_menuOpen = true;
+     HideThumb();
+     Redraw();
+-    bool appMenu = Tray_Menu(app, s_hwnd, at, [] { HideNow(); }, offerAppMenu, MenuAlign());
++    Tray_Menu(app, s_hwnd, at, [] { HideNow(); }, MenuAlign());
+     s_menuOpen = false;
+     s_trayHot = -1;
+     Redraw();
+-    if (appMenu && s_open) TrayAppMenu(cell, app);
+ }
+ 
+ bool IsStartUi(HWND h) { return h && GetClassNameStr(h) == L"Windows.UI.Core.CoreWindow"; }
+@@ -4658,6 +4709,7 @@
          case kModIme: return Tr(L"输入法");
          case kModBattery: return Tr(L"电量");
          case kModClock: return Tr(L"时钟");
@@ -254,7 +321,7 @@
          case kModVolume: return Tr(L"音量");
          case kModBright: return Tr(L"亮度");
          case kPartLevels: {  // 这一行放着哪几根
-@@ -4980,6 +5033,7 @@
+@@ -4980,6 +5032,7 @@
                         : p == kModClock   ? mods.clock
                         : p == kModVolume  ? mods.volume
                         : p == kModBright  ? mods.brightness
@@ -262,7 +329,7 @@
                         : p == kPartRadios ? mods.radios
                                            : true;
          if (!already) ShowPart(p, true);  // 先放出来（自由布局时找个空位，按原来的大小）
-@@ -5062,7 +5116,7 @@
+@@ -5062,7 +5115,7 @@
      switch (part) {
          case kModTray:
              mods.tray = on;
@@ -271,7 +338,7 @@
              s_trayPage = s_trayFirst = 0;
              if (on) Tray_Refresh();
              break;
-@@ -5083,6 +5137,10 @@
+@@ -5083,6 +5136,10 @@
              s_showBattery = on && s_battery.present;
              break;
          case kModClock: mods.clock = on; break;
@@ -282,7 +349,7 @@
          case kModStart:
              mods.start = on;
              if (!on && s_sel == 0) s_sel = DefaultSelection();
-@@ -5653,10 +5711,12 @@
+@@ -5653,10 +5710,12 @@
  void ShowEditMenu(POINT client) {
      enum { kCmdPlace = 1, kCmdDone, kCmdSave, kCmdRestore, kCmdReset, kCmdPart = 100 };
      HMENU menu = CreatePopupMenu();
@@ -298,7 +365,16 @@
      if (s_dual) {  // 底部和侧边一起：开始按钮、窗口格子也能隐藏（放到另一条上）
          parts.insert(parts.begin(), {kModStart, kModWindows});
          shown.insert(shown.begin(), {StartShown(), WindowsShown()});
-@@ -6685,10 +6745,11 @@
+@@ -6156,7 +6215,7 @@
+ 
+         case WM_APP_TRAY_MENU: {
+             std::unique_ptr<TrayApp> app(reinterpret_cast<TrayApp*>(lParam));
+-            if (app && s_open && !s_preview) ShowTrayMenu(s_trayHot, *app, false);
++            if (app && s_open && !s_preview) ShowTrayMenu(s_trayHot, *app);
+             else if (app) Log(L"托盘：迷你任务栏已经收起，不再弹 %ls 的菜单", app->name.c_str());
+             return 0;
+         }
+@@ -6685,10 +6744,11 @@
      if (s_showIme) s_ime = Ime_Get(s_imeTarget);
      s_battery = Battery_Get();
      s_showBattery = mods.battery && !s_compact && s_battery.present;
@@ -311,7 +387,7 @@
      s_trayStyle = s_look.trayStyle;
      s_hoverTray = -1;
      s_overTray = false;
-@@ -7023,6 +7084,7 @@
+@@ -7023,6 +7083,7 @@
          // 这条边上显示着的别的东西（大概：隐藏的不算，没电池的电量这种还是算）
          bool shown[kFreeItems] = {mods.start, mods.windows, mods.tray, mods.media, mods.ime, mods.battery, mods.clock,
                                    !vertical && mods.volume && mods.volumeCapsule, !vertical && mods.brightness && mods.brightCapsule,
@@ -597,7 +673,35 @@
      }
  
      // 展开“隐藏的图标”，在里面点。只是去点里面的一个图标（不是要看隐藏的图标）时先遮住：
-@@ -1047,12 +1114,12 @@
+@@ -1004,17 +1071,16 @@
+     if (HANDLE h = CreateThread(nullptr, 0, EndThread, new EndJob{app.name, std::move(pids)}, 0, nullptr)) CloseHandle(h);
+ }
+ 
+-enum TrayCmd : UINT { kTrayOpen = 1, kTrayAppMenu, kTrayLocation, kTrayEnd };
++enum TrayCmd : UINT { kTrayOpen = 1, kTrayLocation, kTrayEnd };
+ 
+ }  // namespace
+ 
+-bool Tray_Menu(const TrayApp& app, HWND owner, POINT at, void (*picked)(), bool appMenu, UINT align) {
++bool Tray_Menu(const TrayApp& app, HWND owner, POINT at, void (*picked)(), UINT align) {
+     std::wstring name = app.name.size() > 40 ? app.name.substr(0, 39) + L"…" : app.name;
+     HMENU menu = CreatePopupMenu();
+     AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, name.c_str());  // 第一行是哪个程序
+     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+     AppendMenuW(menu, MF_STRING, kTrayOpen, Tr(L"打开"));
+-    if (appMenu) AppendMenuW(menu, MF_STRING, kTrayAppMenu, Tr(L"程序菜单"));
+     if (GetFileAttributesW(app.exe.c_str()) != INVALID_FILE_ATTRIBUTES)
+         AppendMenuW(menu, MF_STRING, kTrayLocation, Tr(L"打开文件所在的位置"));
+     // 资源管理器（“安全删除硬件”等）和本程序自己不给结束：一结束桌面、任务栏就没了，或者来不及把任务栏放回来
+@@ -1030,7 +1096,6 @@
+     UINT cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY | align, at.x, at.y, 0, owner, nullptr);
+     PostMessageW(owner, WM_NULL, 0, 0);
+     DestroyMenu(menu);
+-    if (cmd == kTrayAppMenu) return true;
+     if (!cmd) return false;
+     if (picked) picked();
+     switch (cmd) {
+@@ -1047,12 +1112,12 @@
      else s_loading = false;
  }
  

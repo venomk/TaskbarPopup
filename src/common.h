@@ -434,10 +434,9 @@ void Tray_Click(const TrayApp& app, bool right, HWND notify = nullptr);
 void Tray_ShowHidden();                 // 展开系统的“隐藏的图标”
 bool Tray_Busy();                       // 还在系统托盘里找、点
 void Tray_RepairVeil();                 // 点托盘图标时调透明的任务栏、隐藏的图标没放回（崩溃、被结束）：放回来
-// 迷你任务栏自己的菜单：打开、打开文件所在的位置、结束程序，appMenu 时再加一项“程序菜单”。
-// 由 owner 在屏幕坐标 at 弹出（默认底边对着它）。选了别的项时先调用 picked（可以为空，比如收起迷你任务栏）再去做；
-// 返回 true = 选了“程序菜单”，由调用的一方去系统托盘里右键它
-bool Tray_Menu(const TrayApp& app, HWND owner, POINT at, void (*picked)(), bool appMenu = false,
+// 迷你任务栏自己的菜单：打开、打开文件所在的位置、结束程序。
+// 由 owner 在屏幕坐标 at 弹出（默认底边对着它）。选了别的项时先调用 picked（可以为空，比如收起迷你任务栏）再去做
+bool Tray_Menu(const TrayApp& app, HWND owner, POINT at, void (*picked)(),
                UINT align = TPM_BOTTOMALIGN);  // align：TrackPopupMenu 的对齐方式
 bool Tray_OnMessage(UINT msg, LPARAM lParam);  // 主窗口收到 WM_APP_TRAY_LAUNCH、WM_APP_TRAY_MENU 时交给它
 

@@ -4176,10 +4176,11 @@ void ShowSelectedMenu() {
     ShowItemMenu(s_sel, MenuAnchor(TileRect(s_sel)));
 }
 
-void ShowTrayMenu(int cell, const TrayApp& app, bool offerAppMenu);
+void ShowTrayMenu(int cell, const TrayApp& app);
+void TrayAppMenu(int cell, const TrayApp& app);
 
 // 点托盘格子：左键先收起迷你任务栏，再去系统托盘里点它。
-// 右键在那一格上方弹迷你任务栏自己的菜单，不碰系统托盘；选“程序菜单”才去系统托盘里右键它（TrayAppMenu）
+// 右键直接去系统托盘里右键它，弹出和系统托盘里一样的右键菜单；点不中时才改成迷你任务栏自己的菜单（Instead）
 void ActivateTray(int i, bool right) {
     if (i < 0 || i >= TrayCells() || !TrayOnPage(i)) return;
     TrayApp app = s_tray[i];
@@ -4188,7 +4189,7 @@ void ActivateTray(int i, bool right) {
         Tray_Click(app, false);
         return;
     }
-    ShowTrayMenu(i, app, true);
+    TrayAppMenu(i, app);
 }
 
 // 去系统托盘里右键它、弹出它自己的菜单。迷你任务栏留着，菜单关了再看要不要收起（WatchTrayMenu）
@@ -4274,8 +4275,7 @@ void WatchTrayMenu() {
 }
 
 // 在那一格上方弹迷你任务栏自己的菜单，迷你任务栏留着；选了一项再收起。
-// offerAppMenu = 加一项“程序菜单”（系统托盘里刚弹不出来时就不加了）
-void ShowTrayMenu(int cell, const TrayApp& app, bool offerAppMenu) {
+void ShowTrayMenu(int cell, const TrayApp& app) {
     EndTrayMode();
     if (cell < 0 || cell >= TrayCells() || s_tray[cell].exe != app.exe) {
         cell = -1;
@@ -4293,11 +4293,10 @@ void ShowTrayMenu(int cell, const TrayApp& app, bool offerAppMenu) {
     s_menuOpen = true;
     HideThumb();
     Redraw();
-    bool appMenu = Tray_Menu(app, s_hwnd, at, [] { HideNow(); }, offerAppMenu, MenuAlign());
+    Tray_Menu(app, s_hwnd, at, [] { HideNow(); }, MenuAlign());
     s_menuOpen = false;
     s_trayHot = -1;
     Redraw();
-    if (appMenu && s_open) TrayAppMenu(cell, app);
 }
 
 bool IsStartUi(HWND h) { return h && GetClassNameStr(h) == L"Windows.UI.Core.CoreWindow"; }
@@ -6216,7 +6215,7 @@ LRESULT PanelProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
         case WM_APP_TRAY_MENU: {
             std::unique_ptr<TrayApp> app(reinterpret_cast<TrayApp*>(lParam));
-            if (app && s_open && !s_preview) ShowTrayMenu(s_trayHot, *app, false);
+            if (app && s_open && !s_preview) ShowTrayMenu(s_trayHot, *app);
             else if (app) Log(L"托盘：迷你任务栏已经收起，不再弹 %ls 的菜单", app->name.c_str());
             return 0;
         }
